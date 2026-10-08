@@ -447,5 +447,33 @@ for (const f of CANDIDATES) {
 }
 check('除 portSpec.js / api.js 外没有其它 JS 侧副本', offenders.length === 0, offenders.join(', '))
 
+// ---------------------------------------------------------------- 对外文案里的数字
+//
+// landing.html 是给用户看的对外页面，写着「集成 N 项网络工具箱」。这个 N 是手抄的，
+// 结果就停在 11 而工具箱里其实已经有 12 个 —— 手抄的数字早晚会和代码分叉。
+// 这里不去数标签栏，直接把目录模块 import 进来取真实长度。
+// （networkTools.js 是纯 ESM、无任何依赖，Node 可直接 import。）
+let NET_TOOLS = []
+try {
+  ;({ NET_TOOLS } = await import(pathToFileURL(path.join(REPO_ROOT, 'src', 'networkTools.js')).href))
+} catch {}
+
+let landingSrc = ''
+try {
+  landingSrc = fs.readFileSync(path.join(REPO_ROOT, 'landing.html'), 'utf8')
+} catch {}
+const statedCount = /集成\s*(\d+)\s*项网络工具箱/.exec(landingSrc)
+
+check(
+  'networkTools.js 的工具目录可用（护栏本身有效）',
+  NET_TOOLS.length > 0,
+  `读到 ${NET_TOOLS.length} 个工具`
+)
+check(
+  'landing.html 声明的网络工具数与 networkTools.js 一致',
+  NET_TOOLS.length > 0 && !!statedCount && Number(statedCount[1]) === NET_TOOLS.length,
+  `landing.html 写 ${statedCount ? statedCount[1] : '未找到'}，实际 ${NET_TOOLS.length}`
+)
+
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`)
 process.exit(fail ? 1 : 0)

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # DevToolkit · macOS 一键构建脚本（Apple Silicon / Intel 均支持）
 # 用法: 解压源码后进入目录执行  bash build-macos.sh
+#
+# 这是 macOS 侧**唯一**的构建入口，自包含：自动装 Rust、配好国内 npm/cargo 镜像，
+# 不依赖 tauri-cli 之类额外构建工具链 —— 与项目「不额外引构建工具链依赖」的取舍一致。
+# （原 installers/macos/build.sh 走 cargo tauri build，需先 cargo install tauri-cli
+#  且没配镜像，与上述取舍相悖，已删除；.dmg 产出改用系统自带 hdiutil 在本脚本内补齐。）
 set -e
 cd "$(dirname "$0")"
 
@@ -10,13 +15,13 @@ echo "════════════════════════�
 
 # ---------- 1. Rust 工具链 ----------
 if ! command -v cargo >/dev/null 2>&1; then
-  echo "[1/5] 未检测到 Rust，通过国内镜像安装（约 2 分钟）..."
+  echo "[1/6] 未检测到 Rust，通过国内镜像安装（约 2 分钟）..."
   export RUSTUP_DIST_SERVER=https://rsproxy.cn
   export RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup
   curl --proto '=https' --tlsv1.2 -sSf https://rsproxy.cn/rustup-init.sh | sh -s -- -y --default-toolchain stable
   source "$HOME/.cargo/env"
 else
-  echo "[1/5] Rust 已就绪: $(rustc --version)"
+  echo "[1/6] Rust 已就绪: $(rustc --version)"
 fi
 
 # cargo 国内镜像
@@ -34,25 +39,25 @@ fi
 
 # ---------- 2. Node ----------
 if ! command -v node >/dev/null 2>&1; then
-  echo "[2/5] 未检测到 Node.js，请先安装（brew install node 或 https://nodejs.org）"
+  echo "[2/6] 未检测到 Node.js，请先安装（brew install node 或 https://nodejs.org）"
   exit 1
 else
-  echo "[2/5] Node 已就绪: $(node --version)"
+  echo "[2/6] Node 已就绪: $(node --version)"
 fi
 
 # ---------- 3. 前端依赖 ----------
 # ⚠️ package.json 在**仓库根目录**（不在 src/）。这里原先写的是 `cd src && npm install`，
 # 而 src/ 下没有 package.json，脚本会在这一步直接失败。前端命令必须在根目录跑。
-echo "[3/5] 安装前端依赖（国内镜像）..."
+echo "[3/6] 安装前端依赖（国内镜像）..."
 npm install --registry=https://registry.npmmirror.com --no-fund --no-audit
 npm run build
 
 # ---------- 4. 编译 Rust ----------
-echo "[4/5] 编译 Rust 后端（首次约 5-10 分钟）..."
+echo "[4/6] 编译 Rust 后端（首次约 5-10 分钟）..."
 cargo build --release --manifest-path src-tauri/Cargo.toml
 
 # ---------- 5. 打包 .app ----------
-echo "[5/5] 打包 DevToolkit.app ..."
+echo "[5/6] 打包 DevToolkit.app ..."
 APP="DevToolkit.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -95,9 +100,22 @@ cat > "$APP/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
+# ---------- 6. 打包 .dmg ----------
+# 用系统自带的 hdiutil，不引任何额外工具；失败只提示、不让整个构建失败（.app 已经好了）。
+echo "[6/6] 打包 DevToolkit.dmg ..."
+DMG="DevToolkit.dmg"
+rm -f "$DMG"
+if hdiutil create -volname "DevToolkit" -srcfolder "$APP" -ov -format UDZO "$DMG" >/dev/null 2>&1; then
+  echo "      ✅ 已生成 $DMG"
+else
+  echo "      · 跳过（hdiutil 打包未成功，.app 不受影响）"
+fi
+
 echo ""
 echo "════════════════════════════════════════════"
-echo "  ✅ 构建完成: $(pwd)/$APP"
+echo "  ✅ 构建完成"
+echo "  .app : $(pwd)/$APP"
+echo "  .dmg : $(pwd)/DevToolkit.dmg"
 echo "  运行方式: 双击 $APP，或 open ./$APP"
 echo "  安装方式: mv $APP /Applications/"
 echo "════════════════════════════════════════════"

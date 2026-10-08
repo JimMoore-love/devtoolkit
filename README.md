@@ -160,8 +160,9 @@ cargo test --manifest-path src-tauri/Cargo.toml       # 单元测试
 ### 打包
 
 - **Windows**：`installers/windows/install.bat` —— 用户级安装，无需管理员，不依赖 PowerShell/COM
-- **macOS**：`installers/macos/build.sh` —— 产出 `.app` 与 `.dmg`
-- **脚本化构建**：`build-macos.sh`（含国内 npm 镜像与 cargo 镜像配置）
+- **macOS**：`bash build-macos.sh` —— 产出 `DevToolkit.app` 与 `DevToolkit.dmg`
+  （自包含：自动装 Rust、配国内 npm/cargo 镜像，**不需要** `tauri-cli`）
+- **macOS 卸载**：`installers/macos/uninstall.sh`
 
 ---
 
@@ -222,7 +223,6 @@ cd src-tauri && cargo check   # 零告警
 ## 已知问题
 
 - **`main.rs` 仍有 2568 行**（含大量单元测试），后续计划拆分为 `lib.rs` + `model` / `sys` / `task` / `net` / `mcp` 模块
-- **`scripts/ctl-once.mjs` 把控制口端口写死成 9527**，没读配置里的 `mcp_port` —— 改过控制口端口后这个脚本会连不上
 - **部分 dev 脚本依赖同步子进程**（`scripts/smoke-test.mjs`、`scripts/guard-selftest.mjs`）。在同步创建进程被拦截的机器上跑不起来（实测某台 Windows 上杀软实时扫描会让 `spawnSync` 直接返回 `EBUSY`；`vite build` / `cargo build` 这类异步启动不受影响）
 
 详细的体检数据与优化方案见 **[`docs/工程优化方案.md`](docs/工程优化方案.md)**。
