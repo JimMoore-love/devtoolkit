@@ -96,27 +96,66 @@ devtoolkit-app/
 
 ## 构建与运行
 
-> Rust 工具链版本已由 `rust-toolchain.toml` 锁定为 **1.95.0**。
-> 本项目**没有引入 `@tauri-apps/cli`**，因此不使用 `tauri dev` / `tauri build` 那套命令，
-> 而是直接 `vite build` + `cargo build` 两步走。
+### 一条命令
 
 ```bash
-# 1. 前端依赖
 npm install
-
-# 2. 前端产物 → dist/（Tauri 窗口从这里加载页面）
-npm run build
-
-# 3. 编译 Rust 后端
-cd src-tauri && cargo build --release && cd ..
-
-# 4. 运行
-./src-tauri/target/release/devtoolkit.exe      # Windows
-./src-tauri/target/release/devtoolkit          # Linux / macOS
+npm run build:app
 ```
 
-只调前端时可以 `npm run dev` 起 Vite 开发服务器（浏览器里看排版），
-但 `@tauri-apps/api` 相关的调用在浏览器里不可用，完整功能仍需跑第 3、4 步。
+`build:app` = `vite build` + `cargo build --release`。产物在
+`src-tauri/target/release/devtoolkit.exe`（Windows）/ `devtoolkit`（Linux、macOS），直接运行即可。
+
+### ⚠️ 前端必须先构建，否则 Rust 侧编不过
+
+`dist/` 是构建产物、**不进版本库**，而 `tauri.conf.json` 里 `frontendDist = "../dist"`
+是**编译期**就要读的路径。所以在没跑过前端构建的目录里直接 `cargo build` **一定失败**：
+
+```
+error: proc macro panicked
+  --> src\main.rs:1964:14
+   = help: message: The `frontendDist` configuration is set to `"../dist"` but this path doesn't exist
+```
+
+这不是依赖装错，只是顺序问题：先 `npm run build`（或直接用上面的 `npm run build:app`）。
+本项目**刻意不引入 `@tauri-apps/cli`**，因此没有 `beforeBuildCommand` 自动兜底，
+也没有 `npm run tauri dev` / `npm run tauri build` 那套命令 —— 不额外引构建工具链依赖。
+
+### 手动分步
+
+```bash
+npm install                                                    # 1. 前端依赖
+npm run build                                                  # 2. 前端产物 → dist/
+cargo build --release --manifest-path src-tauri/Cargo.toml      # 3. Rust 后端
+./src-tauri/target/release/devtoolkit.exe                       # 4. 运行（Windows）
+```
+
+Rust 工具链版本已由 `rust-toolchain.toml` 锁定为 **1.95.0**。
+
+只调前端时可 `npm run dev` 起 Vite 开发服务器（浏览器里看排版），
+但 `@tauri-apps/api` 相关的调用在浏览器里不可用，完整功能仍需构建后运行。
+
+### 从零复现（验证「拉下来真的能跑」）
+
+在**空目录**克隆后照下面走一遍，全程不依赖本机任何既有状态：
+
+```bash
+git clone https://github.com/JimMoore-love/devtoolkit.git && cd devtoolkit
+npm ci                                               # 严格按 package-lock.json 重装
+npm run build:app                                    # 前端 + Rust release
+cargo test --manifest-path src-tauri/Cargo.toml       # 单元测试
+```
+
+实测记录（2026-10-08，Windows / rustc 1.95.0）：
+
+| 步骤 | 结果 |
+|---|---|
+| 克隆 | 90 文件 / 1.6 MB（无 `node_modules` / `target` / `dist`） |
+| `npm ci` | 32 包 / 约 1 分钟 |
+| `npm run build` | 55 modules，< 1 秒 |
+| `cargo build`（全新 target，debug） | **3m07s**，产出 exe 15.9 MB |
+| `cargo build --release`（全新 target） | **4m35s**，`devtoolkit.exe` 11.2 MB + `devtoolkit-mcp.exe` 520 KB |
+| `cargo test` | **104 passed / 0 failed** |
 
 ### 打包
 

@@ -41,17 +41,15 @@ else
 fi
 
 # ---------- 3. 前端依赖 ----------
+# ⚠️ package.json 在**仓库根目录**（不在 src/）。这里原先写的是 `cd src && npm install`，
+# 而 src/ 下没有 package.json，脚本会在这一步直接失败。前端命令必须在根目录跑。
 echo "[3/5] 安装前端依赖（国内镜像）..."
-cd src
 npm install --registry=https://registry.npmmirror.com --no-fund --no-audit
 npm run build
-cd ..
 
 # ---------- 4. 编译 Rust ----------
 echo "[4/5] 编译 Rust 后端（首次约 5-10 分钟）..."
-cd src-tauri
-cargo build --release
-cd ..
+cargo build --release --manifest-path src-tauri/Cargo.toml
 
 # ---------- 5. 打包 .app ----------
 echo "[5/5] 打包 DevToolkit.app ..."
@@ -74,7 +72,10 @@ if [ -f "$ICON_SRC" ]; then
   rm -rf "$APP/Contents/Resources/icon.iconset"
 fi
 
-cat > "$APP/Contents/Info.plist" <<'EOF'
+# 版本号从 package.json 现取，不再写死 —— 原先这里硬编码 1.2.0，
+# 项目已经到 1.5.0 而 plist 里还印着旧版本（同一个版本号在仓库里有 5 处副本，必然漂移）。
+VER="$(node -p "require('./package.json').version")"
+cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -82,8 +83,8 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
   <key>CFBundleName</key><string>DevToolkit</string>
   <key>CFBundleDisplayName</key><string>DevToolkit</string>
   <key>CFBundleIdentifier</key><string>cn.devtoolkit.app</string>
-  <key>CFBundleVersion</key><string>1.2.0</string>
-  <key>CFBundleShortVersionString</key><string>1.2.0</string>
+  <key>CFBundleVersion</key><string>${VER}</string>
+  <key>CFBundleShortVersionString</key><string>${VER}</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>DevToolkit</string>
   <key>CFBundleIconFile</key><string>icon.icns</string>

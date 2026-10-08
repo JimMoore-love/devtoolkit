@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:app": "npm run build && cargo build --release --manifest-path src-tauri/Cargo.toml",
     "preview": "vite preview",
     "check": "node scripts/check-template-refs.mjs",
     "check:guards": "node scripts/guard-selftest.mjs",
