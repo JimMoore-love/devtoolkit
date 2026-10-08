@@ -1,8 +1,10 @@
 // 一次性诊断脚本：问控制口要 list_tasks / status，确认当前服务是不是本应用托管的
 import fs from 'node:fs'
 import net from 'node:net'
+import { configPath } from './ensure-gui.mjs'
 
-const CFG = 'C:/Users/lenovo/AppData/Roaming/cn.devtoolkit.app/devtoolkit.json'
+// 配置路径不写死用户名（原先硬编码为 C:/Users/lenovo/...），统一走 ensure-gui 的推导
+const CFG = configPath()
 const cfg = JSON.parse(fs.readFileSync(CFG, 'utf8'))
 
 function call(cmd, args = {}) {

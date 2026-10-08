@@ -6,7 +6,7 @@ REM  双击运行，或命令行：install.bat
 REM ============================================================
 
 set "APP=DevToolkit"
-set "VER=1.1.0"
+set "VER=1.5.0"
 set "INSTALLDIR=%LOCALAPPDATA%\Programs\DevToolkit"
 
 echo == %APP% v%VER% 安装 ==

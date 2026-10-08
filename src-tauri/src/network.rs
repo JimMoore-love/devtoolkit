@@ -478,28 +478,16 @@ fn parse_tracert(raw: &str) -> Vec<Hop> {
 // ---------------- 端口扫描 ----------------
 
 /// 解析端口表达式："21,22,80,8000-8005"
+///
+/// **规则委托给 `crate::ports`，这里不再自己实现一份。**
+/// 收敛前这里有一份独立实现：认全角逗号、跨度上限 2000、接受端口 0、还会自动排序 ——
+/// 与项目管理里的那一份（分号/空白、上限 256、拒绝 0）规则不同，于是出现
+/// 「端口扫描里写 `1-2000` 能跑，项目管理里写 `3000-4000` 报跨度过大」这种用户可见的矛盾。
+///
+/// 这里不再排序：扫描结果最终由 `open.sort_by_key` 统一排序，
+/// 中间按书写顺序分块对结果没有任何影响。
 fn parse_ports(spec: &str) -> Vec<u16> {
-    let mut ports = Vec::new();
-    for part in spec.split(&[',', '，', ' '][..]) {
-        let p = part.trim();
-        if p.is_empty() {
-            continue;
-        }
-        if let Some((a, b)) = p.split_once('-') {
-            if let (Ok(sa), Ok(sb)) = (a.trim().parse::<u16>(), b.trim().parse::<u16>()) {
-                if sa <= sb && sb - sa < 2000 {
-                    for x in sa..=sb {
-                        ports.push(x);
-                    }
-                }
-            }
-        } else if let Ok(x) = p.parse::<u16>() {
-            ports.push(x);
-        }
-    }
-    ports.sort_unstable();
-    ports.dedup();
-    ports
+    crate::ports::parse_lenient(spec)
 }
 
 pub fn port_scan(host: &str, ports_spec: &str) -> Result<PortScanResult, String> {

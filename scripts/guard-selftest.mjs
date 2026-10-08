@@ -295,5 +295,157 @@ check(
   )
 )
 
+// ---------------------------------------------------------------- 端口解析：单一真相
+//
+// 背景：端口声明的解析规则曾在仓库里有 **5 份副本**（Rust 3 份 + JS 2 份），
+// 分隔符、跨度上限、是否接受端口 0 各写各的，直接导致用户可见的矛盾 ——
+// 「端口扫描里写 1-2000 能跑，项目管理里写 3000-4000 报跨度过大」。
+//
+// 下面这几条断言做两件事：
+//   1. 防止第 6 份副本出现（扫描全仓，白名单之外不许再出现解析特征）
+//   2. 防止两侧规则再次漂移：直接把 ports.rs 里那份声明式用例表抠出来，
+//      逐条喂给前端实现。两侧对着**同一张契约**校验，不需要第三份副本。
+
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url))
+const REPO_ROOT = path.resolve(SCRIPT_DIR, '..')
+
+const { parsePortSpec, MAX_PORT_RANGE_SPAN } = await import(
+  pathToFileURL(path.join(REPO_ROOT, 'src', 'portSpec.js')).href
+)
+
+function collectFiles(dir, exts, out = []) {
+  let entries = []
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return out
+  }
+  for (const e of entries) {
+    const p = path.join(dir, e.name)
+    if (e.isDirectory()) {
+      if (e.name === 'node_modules' || e.name === '.git' || e.name === 'target') continue
+      collectFiles(p, exts, out)
+    } else if (exts.some((x) => e.name.endsWith(x))) {
+      out.push(p)
+    }
+  }
+  return out
+}
+
+const rel = (p) => path.relative(REPO_ROOT, p).split(path.sep).join('/')
+
+// ---- 1) 用例表：从 ports.rs 抠出来，逐条喂给前端实现 ----
+const PORTS_RS = path.join(REPO_ROOT, 'src-tauri', 'src', 'ports.rs')
+const NETWORK_RS = path.join(REPO_ROOT, 'src-tauri', 'src', 'network.rs')
+const API_JS = path.join(REPO_ROOT, 'src', 'api.js')
+const PORT_SPEC_JS = path.join(REPO_ROOT, 'src', 'portSpec.js')
+
+let portsSrc = ''
+try {
+  portsSrc = fs.readFileSync(PORTS_RS, 'utf8')
+} catch {}
+
+// 匹配 `("3000-3003", &[3000, 3001, 3002, 3003]),`
+const CASES = [...portsSrc.matchAll(/\("([^"]*)",\s*&\[([0-9,\s]*)\]\s*\)/g)].map((m) => ({
+  spec: m[1],
+  expect: m[2].split(',').map((s) => s.trim()).filter(Boolean).map(Number),
+}))
+
+// 先确认解析本身是有效的 —— 否则"0 条用例全过"是最坏的假安全
+check('ports.rs 的共享用例表被成功解析', CASES.length >= 15, `解析到 ${CASES.length} 条`)
+
+const sameNums = (a, b) => a.length === b.length && a.every((v, i) => v === b[i])
+const mismatches = CASES.filter(({ spec, expect }) => !sameNums(parsePortSpec(spec), expect))
+check(
+  '前端实现满足 ports.rs 声明的每一条用例',
+  CASES.length > 0 && mismatches.length === 0,
+  mismatches
+    .slice(0, 3)
+    .map(({ spec, expect }) => `${JSON.stringify(spec)} 期望 ${JSON.stringify(expect)} 实得 ${JSON.stringify(parsePortSpec(spec))}`)
+    .join('; ')
+)
+
+// ---- 2) 两侧的跨度上限与分隔符必须一致 ----
+const rustSpan = /MAX_PORT_RANGE_SPAN\s*:\s*u16\s*=\s*(\d+)/.exec(portsSrc)
+check(
+  '跨度上限两侧一致',
+  !!rustSpan && Number(rustSpan[1]) === MAX_PORT_RANGE_SPAN,
+  `Rust=${rustSpan ? rustSpan[1] : '未找到'} JS=${MAX_PORT_RANGE_SPAN}`
+)
+
+const SEPARATORS = [',', ';', '，', '；', '|']
+// 注意按「行」取：`const SEPARATORS: [char; 5] = [...]` 里那个分号会让
+// 非贪婪的 `[\s\S]*?;` 提前收尾，检查就变成永远失败的噪音。
+const sepLine = /const SEPARATORS[^\n]*/.exec(portsSrc)?.[0] ?? ''
+check(
+  'ports.rs 的分隔符集合完整',
+  SEPARATORS.every((c) => sepLine.includes(`'${c}'`)),
+  sepLine.replace(/\s+/g, ' ').slice(0, 80)
+)
+
+let portSpecSrc = ''
+try {
+  portSpecSrc = fs.readFileSync(PORT_SPEC_JS, 'utf8')
+} catch {}
+const jsSepLine = /const SEPARATORS[\s\S]*?\n/.exec(portSpecSrc)?.[0] ?? ''
+check(
+  'src/portSpec.js 的分隔符集合与 Rust 相同',
+  SEPARATORS.every((c) => jsSepLine.includes(c)),
+  jsSepLine.trim()
+)
+
+// ---- 3) 不许再出现第 6 份副本 ----
+let networkSrc = ''
+try {
+  networkSrc = fs.readFileSync(NETWORK_RS, 'utf8')
+} catch {}
+const parsePortsBody = /fn parse_ports\([\s\S]*?\n\}/.exec(networkSrc)?.[0] ?? ''
+check(
+  'network.rs 的 parse_ports 已委托给 ports 模块',
+  parsePortsBody.includes('crate::ports::parse_lenient'),
+  parsePortsBody.replace(/\s+/g, ' ').slice(0, 90)
+)
+check(
+  'network.rs 不再自带分隔符表',
+  parsePortsBody.length > 0 && !/['"]，['"]/.test(parsePortsBody),
+  '仍然出现全角逗号字面量'
+)
+
+let apiSrc = ''
+try {
+  apiSrc = fs.readFileSync(API_JS, 'utf8')
+} catch {}
+check(
+  'api.js 从 portSpec.js re-export（保持对外接口不变）',
+  /export\s*\{[^}]*parsePortSpec[^}]*\}\s*from\s*['"]\.\/portSpec\.js['"]/.test(apiSrc)
+)
+check(
+  'api.js 里没有第二份实现',
+  !/function\s+parsePortSpec\s*\(/.test(apiSrc) && !/PORT_RANGE_SPAN\s*=\s*\d/.test(apiSrc)
+)
+
+// 全仓扫描：除白名单外，不该有人再定义端口解析
+const CANDIDATES = [
+  ...collectFiles(path.join(REPO_ROOT, 'src'), ['.js', '.vue']),
+  ...collectFiles(path.join(REPO_ROOT, 'scripts'), ['.mjs']),
+]
+const WHITELIST = new Set([rel(PORT_SPEC_JS), rel(API_JS)])
+const offenders = []
+for (const f of CANDIDATES) {
+  if (WHITELIST.has(rel(f))) continue
+  let src = ''
+  try {
+    src = fs.readFileSync(f, 'utf8')
+  } catch {
+    continue
+  }
+  // 特征：同时出现「自建端口区间变量」与「端口号边界 65535」才算一份解析副本
+  const looksLikeParser =
+    /MAX_PORT_RANGE_SPAN\s*=\s*\d/.test(src) ||
+    (/parsePortSpec\s*\([^)]*\)\s*\{/.test(src) && /65535/.test(src))
+  if (looksLikeParser) offenders.push(rel(f))
+}
+check('除 portSpec.js / api.js 外没有其它 JS 侧副本', offenders.length === 0, offenders.join(', '))
+
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`)
 process.exit(fail ? 1 : 0)

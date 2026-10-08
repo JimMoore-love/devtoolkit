@@ -10,11 +10,14 @@
  */
 import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const isWin = process.platform === 'win32'
+// cargo/rustc 的用户级安装目录由用户主目录推导，不写死用户名
+const CARGO_HOME_BIN = join(homedir(), '.cargo', 'bin')
 const args = new Set(process.argv.slice(2))
 const quick = args.has('--quick')
 const noBuild = args.has('--no-build') || quick
@@ -36,7 +39,7 @@ const extraPath = [
   isWin ? 'D:\\ServBay\\packages\\rust\\1\\cargo\\bin' : null,
   isWin ? 'D:\\ServBay\\packages\\rust\\1\\rustc\\bin' : null,
   isWin ? 'D:\\ServBay\\packages\\node\\current' : null,
-  isWin ? 'C:\\Users\\lenovo\\.cargo\\bin' : null,
+  isWin ? CARGO_HOME_BIN : null,
 ].filter((p) => p && existsSync(p))
 
 /** PATH 变量在 Windows 上是 'Path'，全量覆盖键名才对，这里按不区分大小写替换 */
@@ -56,7 +59,7 @@ const CARGO = pickBin(
   [
     process.env.CARGO,
     isWin ? 'D:\\ServBay\\packages\\rust\\1\\cargo\\bin\\cargo.exe' : null,
-    isWin ? 'C:\\Users\\lenovo\\.cargo\\bin\\cargo.exe' : null,
+    isWin ? join(CARGO_HOME_BIN, 'cargo.exe') : null,
     '/usr/local/bin/cargo',
   ],
   'cargo'

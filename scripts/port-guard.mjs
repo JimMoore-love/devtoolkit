@@ -22,6 +22,9 @@ import http from 'node:http'
 import path from 'node:path'
 import { configPath } from './ensure-gui.mjs'
 import { checkGuards, formatProblems } from './guard-checks.mjs'
+// 端口声明解析直接用前端那一份（src/portSpec.js 零依赖，Node 能直接 import）。
+// 以前这里自己写了一份：认 `|`、跨度无上限、起止颠倒还会自动翻转 —— 与后端规则不同。
+import { parsePortSpec } from '../src/portSpec.js'
 
 // ---------- 参数 ----------
 const argv = process.argv.slice(2)
@@ -34,23 +37,6 @@ const jsonOut = flag('json')
 const guardsOnly = flag('guards-only')
 const extraPorts = parsePortSpec(value('ports'))
 const expectPorts = parsePortSpec(value('expect'))
-
-// ---------- 端口 spec（与后端 / src/api.js 同一套语义，含 3000-3010 区间） ----------
-function parsePortSpec(spec) {
-  const out = []
-  for (const part of String(spec || '').split(/[,\s;|]+/)) {
-    if (!part) continue
-    const m = /^(\d+)\s*-\s*(\d+)$/.exec(part)
-    if (m) {
-      const a = Number(m[1])
-      const b = Number(m[2])
-      for (let p = Math.min(a, b); p <= Math.max(a, b); p++) out.push(p)
-    } else if (/^\d+$/.test(part)) {
-      out.push(Number(part))
-    }
-  }
-  return [...new Set(out)].filter((p) => p > 0 && p <= 65535)
-}
 
 // ---------- 探测 ----------
 function tcpProbe(port, timeout = 1500) {

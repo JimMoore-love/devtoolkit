@@ -5,6 +5,7 @@ mod control_proto;
 mod mcp_clients;
 mod network;
 mod platform;
+mod ports;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
@@ -275,8 +276,7 @@ const PORTS_CACHE_TTL: Duration = Duration::from_millis(1000);
 
 /// 托管项目数量上限：配置是整份读写的，无上限时一个异常的大数组会让每次操作都变慢
 const MAX_PROJECTS: usize = 500;
-/// 端口区间写法（3000-3010）一次最多展开多少个
-const MAX_PORT_RANGE_SPAN: u16 = 256;
+// 端口区间跨度上限（MAX_PORT_RANGE_SPAN）已随解析实现一起收敛到 `ports` 模块
 
 /// `exec_command` 默认超时。没有超时的话，一条 `ping -t` 就能把处理该请求的
 /// IPC 线程永久占住，界面表现为"快速命令页彻底卡死"。
@@ -709,81 +709,11 @@ fn save_projects(app: AppHandle, projects: Vec<Project>) -> Result<(), String> {
 
 // ---------------- task (project runner) ----------------
 
-/// 单个端口号：1-65535。0 不是可用的监听端口，写 0 通常是把默认值当真了
-fn parse_port_num(s: &str) -> Option<u16> {
-    let n: u32 = s.trim().parse().ok()?;
-    if n == 0 || n > u16::MAX as u32 {
-        return None;
-    }
-    Some(n as u16)
-}
-
-/// 宽松解析端口声明，用于**运行时判定**：`"3000,8080 9000"`、`"3000-3010"`。
-///
-/// 这里刻意不报错——扫描运行态不能因为配置里有一个写错的端口号就整体失败。
-/// 严格校验走 `validate_port_spec`，在保存配置时执行。
-fn parse_port_spec(spec: &str) -> Vec<u16> {
-    let mut seen = HashSet::new();
-    let mut out = Vec::new();
-    for raw in spec.split(|c: char| c == ',' || c == ';' || c.is_whitespace()) {
-        let s = raw.trim();
-        if s.is_empty() {
-            continue;
-        }
-        let (lo, hi) = match s.split_once('-') {
-            Some((a, b)) => (a, b),
-            None => (s, s),
-        };
-        let (Some(a), Some(b)) = (parse_port_num(lo), parse_port_num(hi)) else {
-            continue;
-        };
-        if a > b || b - a > MAX_PORT_RANGE_SPAN {
-            continue;
-        }
-        for p in a..=b {
-            if seen.insert(p) {
-                out.push(p);
-            }
-        }
-    }
-    out
-}
-
-/// 严格校验端口声明，用于**保存配置**时。返回展开后的端口列表或第一条错误原因。
-///
-/// 与宽松版分开的原因：以前非法项是被静默丢弃的，用户写 `3000-3010` 以为配了区间，
-/// 实际一个端口都没生效，而界面上什么提示都没有。这类"静默失效"必须变成显式报错。
-fn validate_port_spec(spec: &str) -> Result<Vec<u16>, String> {
-    let mut seen = HashSet::new();
-    let mut out = Vec::new();
-    for raw in spec.split(|c: char| c == ',' || c == ';' || c.is_whitespace()) {
-        let s = raw.trim();
-        if s.is_empty() {
-            continue;
-        }
-        let (lo, hi) = match s.split_once('-') {
-            Some((a, b)) => (a.trim(), b.trim()),
-            None => (s, s),
-        };
-        let a = parse_port_num(lo).ok_or_else(|| format!("端口「{raw}」不是 1-65535 之间的数字"))?;
-        let b = parse_port_num(hi).ok_or_else(|| format!("端口「{raw}」不是 1-65535 之间的数字"))?;
-        if a > b {
-            return Err(format!("端口区间「{raw}」起止颠倒，应写作 {b}-{a}"));
-        }
-        if b - a > MAX_PORT_RANGE_SPAN {
-            return Err(format!(
-                "端口区间「{raw}」跨度 {}(个) 过大，最多 {MAX_PORT_RANGE_SPAN} 个",
-                b - a + 1
-            ));
-        }
-        for p in a..=b {
-            if seen.insert(p) {
-                out.push(p);
-            }
-        }
-    }
-    Ok(out)
-}
+// 端口声明解析已收敛到 `ports` 模块（原先这里有宽松/严格两份实现）。
+// 调用点：运行时判定用 `ports::parse_lenient`，保存配置用 `ports::validate`。
+//
+// 收敛前这段逻辑在仓库里有 5 份副本、规则互相矛盾 —— 最典型的是
+// 「端口扫描里写 1-2000 能跑，项目管理里写 3000-4000 报跨度过大」。
 
 /// 校验整份项目列表。**保存路径上唯一的守门人**：
 /// 脏配置一旦落盘，运行期到处都要做防御，不如在入口拦住。
@@ -842,7 +772,7 @@ fn validate_projects(projects: &[Project]) -> Result<(), String> {
             }
         }
 
-        validate_port_spec(&p.ports).map_err(|e| format!("项目 {label} {e}"))?;
+        ports::validate(&p.ports).map_err(|e| format!("项目 {label} {e}"))?;
 
         for e in &p.env {
             let k = e.key.trim();
@@ -928,11 +858,11 @@ fn inspect_project(project: &Project) -> ProjectCheck {
         }
     }
 
-    if let Ok(ports) = validate_port_spec(&project.ports) {
-        if ports.len() > 32 {
+    if let Ok(declared) = ports::validate(&project.ports) {
+        if declared.len() > 32 {
             out.warnings.push(format!(
                 "声明了 {} 个端口，端口检测会变慢，建议只写关键端口",
-                ports.len()
+                declared.len()
             ));
         }
     }
@@ -947,7 +877,7 @@ fn is_listening(p: &PortInfo) -> bool {
 
 /// 解析端口声明，返回其中已被占用的端口
 fn find_port_conflicts(spec: &str) -> Result<Vec<PortConflict>, String> {
-    let wanted: HashSet<u16> = parse_port_spec(spec).into_iter().collect();
+    let wanted: HashSet<u16> = ports::parse_lenient(spec).into_iter().collect();
     if wanted.is_empty() {
         return Ok(Vec::new());
     }
@@ -989,7 +919,7 @@ fn runtime_by_ports(projects: &[Project], ports: &[PortInfo]) -> Vec<ProjectRunt
         .collect();
 
     for (i, p) in projects.iter().enumerate() {
-        let wanted = parse_port_spec(&p.ports);
+        let wanted = ports::parse_lenient(&p.ports);
         if wanted.is_empty() {
             continue;
         }
@@ -1038,7 +968,7 @@ fn apply_path_match(runtime: &mut [ProjectRuntime], projects: &[Project], ports:
         .iter()
         .enumerate()
         .filter(|(i, p)| {
-            !runtime[*i].running && parse_port_spec(&p.ports).is_empty() && !p.cwd.trim().is_empty()
+            !runtime[*i].running && ports::parse_lenient(&p.ports).is_empty() && !p.cwd.trim().is_empty()
         })
         .map(|(i, _)| i)
         .collect();
@@ -2150,13 +2080,9 @@ mod tests {
         assert!(rt[2].ports.is_empty());
     }
 
-    /// 端口声明解析与目录匹配边界
+    /// 项目目录匹配边界
     #[test]
-    fn port_spec_and_dir_match() {
-        assert_eq!(parse_port_spec("3000,8080 9000;3000"), vec![3000, 8080, 9000]);
-        assert!(parse_port_spec("abc,xyz").is_empty());
-        assert!(parse_port_spec("").is_empty());
-
+    fn dir_match() {
         assert!(dir_hit("d:\\www\\app", "D:\\WWW\\APP"));
         assert!(dir_hit("d:\\www\\app", "D:\\WWW\\APP\\src"));
         assert!(dir_hit("d:\\www\\app", "\"D:\\WWW\\app\""));
@@ -2165,58 +2091,8 @@ mod tests {
         assert!(!dir_hit("d:\\www\\app", ""));
     }
 
-    // ---------------- 端口解析：宽松路径 ----------------
-
-    /// 宽松解析必须"什么脏输入都吃得下、绝不 panic、绝不把好的丢掉"——
-    /// 它跑在每次扫描里，配置被手工改坏也不该让扫描整体失败
-    #[test]
-    fn lenient_port_spec_never_panics_on_dirty_input() {
-        assert!(parse_port_spec("").is_empty());
-        assert!(parse_port_spec(",,,;;;   ").is_empty());
-        assert!(parse_port_spec("-").is_empty());
-        assert!(parse_port_spec("-1").is_empty(), "负数不是端口");
-        assert!(parse_port_spec("0").is_empty(), "0 不是可监听端口");
-        assert!(parse_port_spec("65536").is_empty(), "超过 u16 上限");
-        assert!(parse_port_spec("99999999999999999999").is_empty());
-        assert!(parse_port_spec("端口").is_empty());
-        assert!(parse_port_spec(&"9".repeat(10_000)).is_empty());
-        // 脏项不该污染合法项
-        assert_eq!(parse_port_spec("3000, oops, 8080"), vec![3000, 8080]);
-        assert_eq!(parse_port_spec("3000 # 后端的端口"), vec![3000]);
-    }
-
-    /// 区间写法必须被识别：以前 `3000-3010` 会被整串丢弃，
-    /// 用户以为配了区间，实际一个端口都没生效且没有任何提示
-    #[test]
-    fn port_spec_supports_ranges() {
-        assert_eq!(parse_port_spec("3000-3003"), vec![3000, 3001, 3002, 3003]);
-        assert_eq!(parse_port_spec("8080,9000-9001"), vec![8080, 9000, 9001]);
-        // 区间与单点重叠时去重
-        assert_eq!(parse_port_spec("3000-3002,3001"), vec![3000, 3001, 3002]);
-        // 起止颠倒 / 跨度过大：宽松路径忽略，严格路径报错
-        assert!(parse_port_spec("3010-3000").is_empty());
-        assert!(parse_port_spec("1-65535").is_empty());
-    }
-
-    #[test]
-    fn validate_port_spec_accepts_valid_and_reports_reason() {
-        assert_eq!(validate_port_spec("").unwrap(), Vec::<u16>::new());
-        assert_eq!(validate_port_spec("8080").unwrap(), vec![8080]);
-        assert_eq!(validate_port_spec(" 8000 , 9528 ").unwrap(), vec![8000, 9528]);
-        assert_eq!(validate_port_spec("3000-3002").unwrap(), vec![3000, 3001, 3002]);
-
-        // 报错必须说清"是哪个端口、错在哪"，否则用户只能猜
-        let e = validate_port_spec("8000,abc").unwrap_err();
-        assert!(e.contains("abc"), "{e}");
-        let e = validate_port_spec("3000-3010-3020").unwrap_err();
-        assert!(e.contains("3000-3010-3020"), "{e}");
-        let e = validate_port_spec("3010-3000").unwrap_err();
-        assert!(e.contains("颠倒"), "{e}");
-        let e = validate_port_spec("1-65535").unwrap_err();
-        assert!(e.contains("过大"), "{e}");
-        assert!(validate_port_spec("0").is_err());
-        assert!(validate_port_spec("65536").is_err());
-    }
+    // 端口声明解析的测试已随实现一起搬到 `ports` 模块（`ports.rs` 的 mod tests）：
+    // 该模块的宽松/严格两条路径、共享用例表、区间跨度边界都在那里覆盖。
 
     // ---------------- 项目配置校验 ----------------
 
@@ -2615,7 +2491,7 @@ mod tests {
         assert!(TASK_LOG_CAP > 0);
         assert!(TASK_LOG_BUCKETS > 1);
         assert!(MAX_PROJECTS > 0);
-        assert!(MAX_PORT_RANGE_SPAN >= 2);
+        assert!(ports::MAX_PORT_RANGE_SPAN >= 2);
         // 端口缓存不能长到"用户点刷新也看不到变化"
         assert!(PORTS_CACHE_TTL <= Duration::from_secs(3));
     }

@@ -42,6 +42,7 @@ devtoolkit-app/
 ├── src/                        # Vue 3 前端
 │   ├── App.vue
 │   ├── api.js                  # 与控制口通信 + 常量镜像（与 Rust 侧一致性由自检脚本比对）
+│   ├── portSpec.js             # 端口声明解析（前端唯一一份）
 │   ├── store.js                # 全局状态
 │   ├── components/
 │   │   ├── Dashboard.vue       # 概览
@@ -56,6 +57,7 @@ devtoolkit-app/
 ├── src-tauri/                  # Rust 后端
 │   ├── src/
 │   │   ├── main.rs             # Tauri 命令层（含单元测试）
+│   │   ├── ports.rs            # 端口声明解析（后端唯一一份，宽松/严格两条出口）
 │   │   ├── network.rs          # 网络工具箱实现（Ping/Trace/Scan/DNS/测速…）
 │   │   ├── control.rs          # 控制口服务端（仅 127.0.0.1 + token）
 │   │   ├── control_proto.rs    # 控制口协议：命令枚举（穷举 match，漏分支即编译失败）
@@ -70,6 +72,25 @@ devtoolkit-app/
 ```
 
 **Rust 后端直接依赖仅 5 个**：`tauri` / `serde` / `serde_json` / `sysinfo` / `encoding_rs`。
+
+### 端口声明只有一份解析规则
+
+`3000,8080`、`3000-3010`、`8080，9000` 这类写法在**整个仓库里只有一套规则**：
+
+| 规则 | 值 |
+|---|---|
+| 分隔符 | `,` `;` `，` `；` `\|` 以及任意空白 |
+| 端口号 | 1–65535 的十进制整数（拒绝 0、拒绝 `+80`、拒绝 `-1`） |
+| 区间 | 起止颠倒视为非法；一次最多展开 **2000** 个 |
+| 顺序 | 保持书写顺序、去重 |
+| 非法项 | 宽松路径（运行时判定 / 端口扫描）**跳过**；严格路径（保存配置）**报错并说明原因** |
+
+实现只有两处：后端 `src-tauri/src/ports.rs`、前端 `src/portSpec.js`
+（`src/api.js` 只是 re-export，`scripts/port-guard.mjs` 直接 import 它）。
+两侧一致性由 `npm run check:guards` 守 —— 它会把 `ports.rs` 里声明的用例表抠出来逐条喂给前端实现。
+
+> 收敛之前这段逻辑有 5 份副本、规则互相矛盾，最典型的表现是
+> 「端口扫描里写 `1-2000` 能跑，项目管理里写 `3000-4000` 报跨度过大」。
 
 ---
 
@@ -139,7 +160,7 @@ task_log  process_detail  start_project  stop_project  takeover_project  kill_pi
 
 ```bash
 npm run check          # 模板引用检查（Vue 模板里引用了不存在的变量会报）
-npm run check:guards   # 护栏自检
+npm run check:guards   # 护栏自检：保护闸门 + 端口解析单一真相（防副本复活 / 防两侧漂移）
 npm run ports          # 端口规则一致性（前后端常量镜像比对）
 npm run verify         # 冒烟测试（完整）
 npm run verify:quick   # 冒烟测试（快速）
@@ -153,7 +174,7 @@ npm run protect:e2e    # 受保护端口端到端
 Rust 侧：
 
 ```bash
-cd src-tauri && cargo test    # 99 个单元测试
+cd src-tauri && cargo test    # 104 个单元测试
 cd src-tauri && cargo check   # 零告警
 ```
 
@@ -161,10 +182,9 @@ cd src-tauri && cargo check   # 零告警
 
 ## 已知问题
 
-- **`main.rs` 已达 2692 行**（含大量单元测试），后续计划拆分为 `lib.rs` + `model` / `sys` / `task` / `net` / `mcp` 模块
-- **端口解析规则有三套实现**（`main.rs::parse_port_spec` / `network.rs::parse_ports` / `api.js::parsePortSpec`），规则不完全一致，计划收敛为一份
-- **两个 dev 脚本里硬编码了 Windows 用户名路径**（`scripts/ctl-once.mjs`、`scripts/smoke-test.mjs`），换机器需注意
-- **`installers/windows/install.bat` 里的 `VER` 仍是 `1.1.0`**，与 `package.json` / `Cargo.toml` / `tauri.conf.json` 的 `1.5.0` 不一致
+- **`main.rs` 仍有 2568 行**（含大量单元测试），后续计划拆分为 `lib.rs` + `model` / `sys` / `task` / `net` / `mcp` 模块
+- **`scripts/ctl-once.mjs` 把控制口端口写死成 9527**，没读配置里的 `mcp_port` —— 改过控制口端口后这个脚本会连不上
+- **部分 dev 脚本依赖同步子进程**（`scripts/smoke-test.mjs`、`scripts/guard-selftest.mjs`）。在同步创建进程被拦截的机器上跑不起来（实测某台 Windows 上杀软实时扫描会让 `spawnSync` 直接返回 `EBUSY`；`vite build` / `cargo build` 这类异步启动不受影响）
 
 详细的体检数据与优化方案见 **[`docs/工程优化方案.md`](docs/工程优化方案.md)**。
 

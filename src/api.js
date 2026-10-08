@@ -50,8 +50,14 @@ export const api = {
 
 export const onEvent = (name, handler) => listen(name, (e) => handler(e.payload))
 
-/** 端口区间最大跨度，与后端 MAX_PORT_RANGE_SPAN 保持一致 */
-export const PORT_RANGE_SPAN = 256
+/**
+ * 端口声明解析：实现已收敛到 `src/portSpec.js`（前端唯一一份）。
+ * 这里 re-export 是为了保持 `api.js` 的对外接口不变（ProjectsView / PortsView 都从这里 import）。
+ *
+ * 注意：原先这里导出的名字是 `PORT_RANGE_SPAN`，现改名为 `MAX_PORT_RANGE_SPAN`
+ * 与后端常量同名（该旧名字在仓库里没有任何调用点）。
+ */
+export { parsePortSpec, MAX_PORT_RANGE_SPAN } from './portSpec.js'
 
 /**
  * 系统关键进程：0 是 System Idle Process，4 是内核态的 System。
@@ -63,35 +69,6 @@ export const PROTECTED_PIDS = [0, 4]
 /** 结束进程前的兜底判断，与后端同一口径 */
 export function isProtectedPid(pid) {
   return PROTECTED_PIDS.includes(Number(pid))
-}
-
-/**
- * 解析端口声明，语义与后端 `parse_port_spec` 对齐：
- * 支持 `3000,8080 9000` 与区间 `3000-3010`，去重、忽略非法项。
- *
- * 前后端各写一套解析是最容易出现"界面显示 3000-3010 已关联、后端其实没认"的地方，
- * 所以这里只此一份，ProjectsView 与 PortsView 都从这里取。
- */
-export function parsePortSpec(spec) {
-  const out = []
-  const seen = new Set()
-  for (const raw of String(spec || '').split(/[,;\s]+/)) {
-    const s = raw.trim()
-    if (!s) continue
-    const m = /^(\d+)(?:-(\d+))?$/.exec(s)
-    if (!m) continue
-    const a = Number(m[1])
-    const b = m[2] === undefined ? a : Number(m[2])
-    const ok = (n) => Number.isInteger(n) && n >= 1 && n <= 65535
-    if (!ok(a) || !ok(b) || a > b || b - a > PORT_RANGE_SPAN) continue
-    for (let p = a; p <= b; p++) {
-      if (!seen.has(p)) {
-        seen.add(p)
-        out.push(p)
-      }
-    }
-  }
-  return out
 }
 
 export function fmtBytes(n) {

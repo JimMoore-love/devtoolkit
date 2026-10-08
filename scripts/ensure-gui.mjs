@@ -5,11 +5,18 @@
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import net from 'node:net'
+import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const cfgPath = join(process.env.APPDATA, 'cn.devtoolkit.app', 'devtoolkit.json')
+
+// 配置路径：默认由 APPDATA 推导（Tauri 的 app_config_dir 就在这里），
+// 不写死用户名 —— 原先几个脚本各自硬编码了 `C:\Users\<名字>\...`。
+// DEVTOOLKIT_CONFIG 可覆盖，便于非标准安装位置。
+const cfgPath =
+  process.env.DEVTOOLKIT_CONFIG ||
+  join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'cn.devtoolkit.app', 'devtoolkit.json')
 
 export function controlPort() {
   try {
