@@ -1,0 +1,33 @@
+# ===== 依赖 =====
+node_modules/
+
+# ===== 构建产物 =====
+dist/
+src-tauri/target/
+src-tauri/target2/
+src-tauri/target-*/
+src-tauri/target_*/
+target-ctx/
+
+# Tauri 运行时生成的 schema（由 tauri-build 自动产出）
+src-tauri/gen/schemas/
+
+# Vite 遗留的临时配置快照
+vite.config.js.timestamp-*.mjs
+
+# ===== 验证/调试产物 =====
+.shots/
+*.log
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ===== 编辑器与系统 =====
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp

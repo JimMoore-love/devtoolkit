@@ -1,0 +1,23 @@
+[package]
+name = "devtoolkit"
+version = "1.5.0"
+description = "开发工具助手 - 端口发现 / 进程管理 / 项目托管 / 快速命令 / 网络工具箱 / MCP 接入"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+# indexmap 1.9 的 build.rs 用 autocfg 探测目标是否有 std。在非 rustup 分发的工具链上
+# 探测失败 → has_std 为假 → IndexMap 的默认泛型参数 S 消失 → schemars 0.8 编译失败。
+# 必须写在 [build-dependencies]：resolver v2 下 build-deps 与普通 deps 的 feature 不合并。
+indexmap = { version = "1.9", features = ["std"] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = "0.30"
+encoding_rs = "0.8"
+
+[profile.release]
+lto = "thin"
+strip = true

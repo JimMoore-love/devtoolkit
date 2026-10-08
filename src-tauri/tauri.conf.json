@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "DevToolkit",
+  "version": "1.5.0",
+  "identifier": "cn.devtoolkit.app",
+  "build": {
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "DevToolkit · 开发工具助手",
+        "width": 1360,
+        "height": 860,
+        "minWidth": 1024,
+        "minHeight": 680,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "开发工具助手：端口发现、进程管理、项目托管、快速命令与网络工具箱",
+    "longDescription": "DevToolkit 是一个跨平台开发工具助手，集成端口/服务发现、进程管理、命令行项目托管、快速命令，以及网络工具箱（Ping/路由追踪/端口扫描/测速/计算器）。",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.png", "icons/icon.ico"],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

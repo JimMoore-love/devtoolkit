@@ -1,0 +1,30 @@
+{
+  "name": "devtoolkit",
+  "private": true,
+  "version": "1.5.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "node scripts/check-template-refs.mjs",
+    "check:guards": "node scripts/guard-selftest.mjs",
+    "ports": "node scripts/port-guard.mjs",
+    "verify": "node scripts/smoke-test.mjs",
+    "verify:quick": "node scripts/smoke-test.mjs --quick",
+    "mcp:selftest": "node scripts/mcp-selftest.mjs",
+    "mcp:tools": "node scripts/mcp-tools-list.mjs",
+    "mcp:protocol": "node scripts/mcp-protocol-test.mjs",
+    "mcp:verify": "node scripts/mcp-verify.mjs",
+    "ui:harness": "node scripts/ui-harness.mjs",
+    "protect:e2e": "node scripts/protect-e2e.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.0",
+    "vite": "^5.4.0"
+  }
+}

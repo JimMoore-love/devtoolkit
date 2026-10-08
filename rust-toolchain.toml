@@ -1,0 +1,12 @@
+# 锁定 Rust 工具链版本。
+#
+# 为什么必须锁：
+# indexmap 1.9 的 build.rs 用 autocfg 探测目标是否有 std。在部分非 rustup 分发的
+# 工具链（如 ServBay 自带的 rust）上探测会失败 → has_std 为假 → IndexMap 失去默认
+# 泛型参数 S → schemars 0.8 编译失败（E0107）。
+#
+# Cargo.toml 的 [build-dependencies] 已加了 indexmap 的 std feature 作为兜底；
+# 这里再锁一个已知可用的版本，避免换机器/换工具链时重新踩坑。
+[toolchain]
+channel = "1.95.0"
+components = ["rustfmt", "clippy"]
